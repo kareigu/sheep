@@ -1,38 +1,100 @@
 use std::sync::Arc;
 
 use config::Config;
+use serenity::model::prelude::command::Command;
 use serenity::model::prelude::{GuildId, ChannelId};
+use serenity::model::application::interaction::Interaction;
+use serenity::utils::Colour;
 use serenity::{prelude::*, async_trait};
 use serenity::model::{
-  gateway::Ready,
+  gateway::{Ready, Activity},
   channel::Message,
+  application::interaction::InteractionResponseType,
+  application::interaction::application_command::ApplicationCommandInteraction,
 };
-use tracing::{info, debug, error};
+use serenity::Error;
+use tracing::{info, debug, error, warn};
 use reddb::RonDb;
 use serde::{Deserialize, Serialize};
 
 struct Handler;
 
+pub async fn text_response<D>(ctx: &Context, command: ApplicationCommandInteraction, text: D) -> Result<(), Error>
+where D: ToString, {
+  let _a = command
+    .edit_original_interaction_response(&ctx.http, |response| {
+      response
+        .embed(|embed| {
+          embed
+            .title(text)
+            .colour(0xFFFFFF)
+        })
+    }).await?;
+  Ok(())
+}
+
 #[async_trait]
 impl EventHandler for Handler {
+  async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+    let command = match interaction.clone().application_command() {
+      Some(c) => c,
+      None => {
+        warn!("Unsupported interaction: {:?}", interaction);
+        return
+      },
+    };
 
-  async fn message(&self, ctx: Context, msg: Message) {
-    debug!("{:?}", msg);
+    if let Err(e) = command.defer(&ctx.http).await {
+      error!("Error deferring command: {}", e);
+      return
+    }
 
-    if msg.content == "kohta ne herää" {
-      match Subscription::create_and_handle(&ctx, &msg).await {
-        SubscriptionHandleResult::Error(e) => error!(e),
-        SubscriptionHandleResult::Added(s) => info!("Added {:?}", s),
-        SubscriptionHandleResult::Removed(s) => info!("Removed {:?}", s),
-      }
-
-      if let Err(e) = msg.channel_id.say(&ctx.http, "BÄÄ").await {
-        error!("Error sending message: {}", e);
-      }
+    let handle_command = match command.data.name.as_str() {
+      "subscribe" => {
+        match Subscription::create_and_handle(&ctx, command.guild_id, command.channel_id).await {
+          SubscriptionHandleResult::Error(e) => {
+            error!(e);
+            text_response(&ctx, command, "Unable to subscribe").await
+          },
+          SubscriptionHandleResult::Removed(s) => {
+            info!("Removed {:?}", s);
+            text_response(&ctx, command, s.format_to_string(&ctx, false).await).await
+          },
+          SubscriptionHandleResult::Added(s) => {
+            info!("Added {:?}", s);
+            text_response(&ctx, command, s.format_to_string(&ctx, true).await).await
+          }
+        }
+      },
+      _ => text_response(&ctx, command, "Unsupported").await,
+    };
+    
+    if let Err(e) = handle_command {
+      error!("Error handling command: {}", e);
+      return
     }
   }
 
-  async fn ready(&self, _: Context, ready: Ready) {
+  async fn ready(&self, ctx: Context, ready: Ready) {
+    let activity = Activity::playing("with pomon persekarvat");
+    ctx.set_activity(activity).await;
+
+    match Command::create_global_application_command(&ctx.http, |command| {
+      command
+        .name("subscribe")
+        .name_localized("ja", "サブスクライブ")
+        .name_localized("fi", "tilaa")
+        .description("Toggle lamb's subscription to this channel")
+        .description_localized("ja", "このチャッネルのサブスクリプチオンをトッグル")
+        .description_localized("fi", "Tilaa/peru tilaus lampaasta tälle kanavalle")
+    })
+    .await {
+      Ok(c) => info!("Created command {:?}", c),
+      Err(e) => error!("Error creating command: {}", e),
+    }
+
+    
+
     info!("{} running", ready.user.tag());
   }
 }
@@ -58,9 +120,33 @@ impl Subscription {
     }
   }
 
-  pub async fn create_and_handle(ctx: &Context, msg: &Message) -> SubscriptionHandleResult {
-    if let Some(guild) = msg.guild_id {
-      let subscription = Subscription::new(guild, msg.channel_id);
+  async fn format_to_string(&self, ctx: &Context, subscribed: bool) -> String {
+    let channel_name = self
+      .channel
+      .name(&ctx.cache)
+      .await
+      .unwrap_or("this channel".to_string());
+
+    let guild_name = self
+      .guild
+      .name(&ctx.cache)
+      .unwrap_or("this guild".to_string());
+
+    let verb = match subscribed {
+      true => "Subscribed to",
+      false => "Unsubscribed from",
+    };
+
+    format!("{} {} in {}",
+      verb,
+      channel_name,
+      guild_name
+    )
+  }
+
+  pub async fn create_and_handle(ctx: &Context, guild_id: Option<GuildId>, channel_id: ChannelId) -> SubscriptionHandleResult {
+    if let Some(guild) = guild_id {
+      let subscription = Subscription::new(guild, channel_id);
       
       subscription.handle(&ctx).await
     } else {
