@@ -4,9 +4,9 @@ use reddb::{serializer::Ron, FileStorage, RedDb};
 use serde::{Deserialize, Serialize};
 use serenity::model::prelude::{ChannelId, GuildId};
 use serenity::prelude::{Context, TypeMapKey};
-use tracing::{debug, error, info, warn};
+use tracing::debug;
 
-#[derive(Clone, Serialize, PartialEq, Deserialize, Debug)]
+#[derive(Clone, Serialize, Eq, PartialEq, Deserialize, Debug)]
 pub struct Subscription {
   pub guild: GuildId,
   pub channel: ChannelId,
@@ -28,12 +28,12 @@ impl Subscription {
       .channel
       .name(&ctx.cache)
       .await
-      .unwrap_or("this channel".to_string());
+      .unwrap_or_else(|| "this channel".to_string());
 
     let guild_name = self
       .guild
       .name(&ctx.cache)
-      .unwrap_or("this guild".to_string());
+      .unwrap_or_else(|| "this guild".to_string());
 
     let verb = match subscribed {
       true => "Subscribed to",
@@ -51,7 +51,7 @@ impl Subscription {
     if let Some(guild) = guild_id {
       let subscription = Subscription::new(guild, channel_id);
 
-      subscription.handle(&ctx).await
+      subscription.handle(ctx).await
     } else {
       SubscriptionHandleResult::Error("No GuildId provided".to_string())
     }

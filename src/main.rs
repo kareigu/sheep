@@ -1,16 +1,14 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use config::Config;
 use reddb::RonDb;
-use serde::{Deserialize, Serialize};
 use serenity::model::application::interaction::Interaction;
 use serenity::model::gateway::{Activity, Ready};
 use serenity::model::prelude::command::Command;
-use serenity::model::prelude::{ChannelId, GuildId};
+use serenity::model::prelude::GuildId;
 use serenity::{async_trait, prelude::*};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 mod messages;
 mod subscription;
@@ -92,7 +90,7 @@ impl EventHandler for Handler {
       return;
     }
 
-    tokio::spawn(messages::create_message_task(ctx));
+    tokio::spawn(messages::message_task(ctx));
   }
 }
 

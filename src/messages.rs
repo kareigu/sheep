@@ -2,9 +2,9 @@ use crate::subscription::{Subscription, Subscriptions};
 use chrono::offset::FixedOffset;
 use chrono::prelude::*;
 use serenity::prelude::Context;
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{fmt::Display, sync::Arc};
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::error;
 
 enum Time {
   Morning,
@@ -43,8 +43,10 @@ impl DayType {
       _ => Some(DayType::WorkDay(time)),
     }
   }
+}
 
-  pub fn to_string(self) -> String {
+impl Display for DayType {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     use DayType::*;
     use Time::*;
 
@@ -65,82 +67,77 @@ impl DayType {
       Sunday(AfterWork) => "🍕🐑 Olipa hyvä Grandiosan pakaste sipuli pizza tasaamaan oloa",
       Sunday(Evening) => "🛏️🐑 Oi voi,, taas pitää valmistautua nukkumaan että jaksaa huomenna leikkiä pomon perse karvoilla koko päivän"
     };
-    str.to_string()
+    write!(f, "{}", str)
   }
 }
 
-pub fn create_message_task(ctx: Arc<Context>) -> impl Future<Output = ()> + Send + 'static {
-  async move {
-    loop {
-      let db = {
-        let data = ctx.data.read().await;
-        data
-          .get::<Subscriptions>()
-          .expect("No Subscriptions in shared data")
-          .clone()
-      };
+pub async fn message_task(ctx: Arc<Context>) {
+  loop {
+    let db = {
+      let data = ctx.data.read().await;
+      data
+        .get::<Subscriptions>()
+        .expect("No Subscriptions in shared data")
+        .clone()
+    };
 
-      let offset = FixedOffset::east(2 * 3600);
-      let now = Utc::now().with_timezone(&offset);
+    let offset = FixedOffset::east(2 * 3600);
+    let now = Utc::now().with_timezone(&offset);
 
-      let sleep_for = {
-        let next = now
-          .with_nanosecond(0)
-          .unwrap()
-          .with_second(0)
-          .unwrap()
-          .checked_add_signed(chrono::Duration::minutes(1))
-          .unwrap();
+    let sleep_for = {
+      let next = now
+        .with_nanosecond(0)
+        .unwrap()
+        .with_second(0)
+        .unwrap()
+        .checked_add_signed(chrono::Duration::minutes(1))
+        .unwrap();
 
-        (next - now).to_std().unwrap()
-      };
+      (next - now).to_std().unwrap()
+    };
 
-      let subscriptions_fetch =
-        tokio::spawn(async move { return db.find_all::<Subscription>().await });
+    let subscriptions_fetch = tokio::spawn(async move { db.find_all::<Subscription>().await });
 
-      let day_type = match DayType::from_date(now) {
-        None => {
-          sleep(sleep_for).await;
-          continue;
-        }
-        Some(t) => t,
-      };
-
-      let message_content = day_type.to_string();
-
-      let subscriptions = match subscriptions_fetch.await {
-        Err(e) => {
-          error!("Couldn't join task: {}", e);
-          sleep(sleep_for).await;
-          continue;
-        }
-        Ok(data) => match data {
-          Err(e) => {
-            error!("Couldn't find subscriptions: {}", e);
-            sleep(sleep_for).await;
-            continue;
-          }
-          Ok(d) => d,
-        },
-      };
-
-      for subscription in subscriptions {
-        let channel = subscription.data.channel;
-
-        if let Err(e) = channel
-          .send_message(&ctx.http, |message| {
-            message.embed(|embed| embed.title(&message_content).colour(0xFFFFFF))
-          })
-          .await
-        {
-          error!(
-            "Error sending automatic message for ChannelId({}): {}",
-            channel, e
-          );
-        }
+    let day_type = match DayType::from_date(now) {
+      None => {
+        sleep(sleep_for).await;
+        continue;
       }
+      Some(t) => t,
+    };
 
-      sleep(sleep_for).await;
+    let subscriptions = match subscriptions_fetch.await {
+      Err(e) => {
+        error!("Couldn't join task: {}", e);
+        sleep(sleep_for).await;
+        continue;
+      }
+      Ok(data) => match data {
+        Err(e) => {
+          error!("Couldn't find subscriptions: {}", e);
+          sleep(sleep_for).await;
+          continue;
+        }
+        Ok(d) => d,
+      },
+    };
+
+    for subscription in subscriptions {
+      let channel = subscription.data.channel;
+
+      if let Err(e) = channel
+        .send_message(&ctx.http, |message| {
+          message.embed(|embed| embed.title(&day_type).colour(0xFFFFFF))
+        })
+        .await
+      {
+        error!(
+          "Error sending automatic message for ChannelId({}): {}",
+          channel, e
+        );
+      }
     }
+
+    sleep(sleep_for).await;
   }
 }
