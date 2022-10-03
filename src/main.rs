@@ -4,34 +4,20 @@ use config::Config;
 use serenity::model::prelude::command::Command;
 use serenity::model::prelude::{GuildId, ChannelId};
 use serenity::model::application::interaction::Interaction;
-use serenity::utils::Colour;
 use serenity::{prelude::*, async_trait};
 use serenity::model::{
   gateway::{Ready, Activity},
-  channel::Message,
-  application::interaction::InteractionResponseType,
-  application::interaction::application_command::ApplicationCommandInteraction,
 };
-use serenity::Error;
 use tracing::{info, debug, error, warn};
 use reddb::RonDb;
 use serde::{Deserialize, Serialize};
 
+mod utils;
+mod subscription;
+use subscription::{Subscription, Subscriptions, SubscriptionHandleResult};
+
 struct Handler;
 
-pub async fn text_response<D>(ctx: &Context, command: ApplicationCommandInteraction, text: D) -> Result<(), Error>
-where D: ToString, {
-  let _a = command
-    .edit_original_interaction_response(&ctx.http, |response| {
-      response
-        .embed(|embed| {
-          embed
-            .title(text)
-            .colour(0xFFFFFF)
-        })
-    }).await?;
-  Ok(())
-}
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -54,19 +40,19 @@ impl EventHandler for Handler {
         match Subscription::create_and_handle(&ctx, command.guild_id, command.channel_id).await {
           SubscriptionHandleResult::Error(e) => {
             error!(e);
-            text_response(&ctx, command, "Unable to subscribe").await
+            utils::text_response(&ctx, command, "Unable to subscribe").await
           },
           SubscriptionHandleResult::Removed(s) => {
             info!("Removed {:?}", s);
-            text_response(&ctx, command, s.format_to_string(&ctx, false).await).await
+            utils::text_response(&ctx, command, s.format_to_string(&ctx, false).await).await
           },
           SubscriptionHandleResult::Added(s) => {
             info!("Added {:?}", s);
-            text_response(&ctx, command, s.format_to_string(&ctx, true).await).await
+            utils::text_response(&ctx, command, s.format_to_string(&ctx, true).await).await
           }
         }
       },
-      _ => text_response(&ctx, command, "Unsupported").await,
+      _ => utils::text_response(&ctx, command, "Unsupported").await,
     };
     
     if let Err(e) = handle_command {
@@ -89,7 +75,7 @@ impl EventHandler for Handler {
         .description_localized("fi", "Tilaa/peru tilaus lampaasta tälle kanavalle")
     })
     .await {
-      Ok(c) => info!("Created command {:?}", c),
+      Ok(c) => info!("Created command {:?}", c.name),
       Err(e) => error!("Error creating command: {}", e),
     }
 
@@ -99,116 +85,6 @@ impl EventHandler for Handler {
   }
 }
 
-#[derive(Clone, Serialize, PartialEq, Deserialize, Debug)]
-struct Subscription {
-  pub guild: GuildId,
-  pub channel: ChannelId,
-}
-
-enum SubscriptionHandleResult {
-  Added(Subscription),
-  Removed(Subscription),
-  Error(String),
-}
-
-impl Subscription {
-
-  pub fn new(guild: GuildId, channel: ChannelId) -> Self {
-    Self {
-      guild,
-      channel,
-    }
-  }
-
-  async fn format_to_string(&self, ctx: &Context, subscribed: bool) -> String {
-    let channel_name = self
-      .channel
-      .name(&ctx.cache)
-      .await
-      .unwrap_or("this channel".to_string());
-
-    let guild_name = self
-      .guild
-      .name(&ctx.cache)
-      .unwrap_or("this guild".to_string());
-
-    let verb = match subscribed {
-      true => "Subscribed to",
-      false => "Unsubscribed from",
-    };
-
-    format!("{} {} in {}",
-      verb,
-      channel_name,
-      guild_name
-    )
-  }
-
-  pub async fn create_and_handle(ctx: &Context, guild_id: Option<GuildId>, channel_id: ChannelId) -> SubscriptionHandleResult {
-    if let Some(guild) = guild_id {
-      let subscription = Subscription::new(guild, channel_id);
-      
-      subscription.handle(&ctx).await
-    } else {
-      SubscriptionHandleResult::Error("No GuildId provided".to_string())
-    }
-  }
-  
-  async fn handle(self, ctx: &Context) -> SubscriptionHandleResult {
-    let db_handle = { 
-      let data = ctx.data.read().await;
-      if let Some(handle) = data.get::<Subscriptions>() {
-        handle.clone()
-      } else {
-        return SubscriptionHandleResult::Error("Database not in shared data".to_string())
-      }
-    };
-  
-    let db = db_handle
-      .read()
-      .await;
-
-
-    let deleted = match db.delete(&self).await {
-      Ok(count) => {
-        debug!("Removed {} subscriptions", count);
-        count != 0
-      },
-      Err(e) => {
-        return SubscriptionHandleResult::Error(format!("Error removing: {}", e))
-      },
-    };
-
-    if deleted {
-      return SubscriptionHandleResult::Removed(self.clone())
-    }
-
-
-    debug!("Adding subscription for GuildID({}) in ChannelId({})", 
-      self.guild, 
-      self.channel
-    );
-    if let Err(e) = db.insert_one(self.clone()).await {
-      return SubscriptionHandleResult::Error(format!("Error inserting: {}", e));
-    };
-
-    SubscriptionHandleResult::Added(self.clone())
-  }
-}
-
-struct Subscriptions;
-
-
-impl TypeMapKey for Subscriptions {
-  type Value = Arc<
-    RwLock<
-      reddb::RedDb<
-        reddb::serializer::Ron, 
-        reddb::FileStorage<reddb::serializer::Ron>
-      >
-    >
-  >;
-}
 
 #[tokio::main]
 async fn main() {
@@ -249,7 +125,7 @@ async fn main() {
     
     let db = RonDb::new::<Subscription>("subscriptions.db")
       .expect("Couldn't create DB");
-    data.insert::<Subscriptions>(Arc::new(RwLock::new(db)));
+    data.insert::<Subscriptions>(Arc::new(db));
   }
 
 
