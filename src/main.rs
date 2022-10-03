@@ -1,23 +1,25 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use config::Config;
-use serenity::model::prelude::command::Command;
-use serenity::model::prelude::{GuildId, ChannelId};
-use serenity::model::application::interaction::Interaction;
-use serenity::{prelude::*, async_trait};
-use serenity::model::{
-  gateway::{Ready, Activity},
-};
-use tracing::{info, debug, error, warn};
 use reddb::RonDb;
 use serde::{Deserialize, Serialize};
+use serenity::model::application::interaction::Interaction;
+use serenity::model::gateway::{Activity, Ready};
+use serenity::model::prelude::command::Command;
+use serenity::model::prelude::{ChannelId, GuildId};
+use serenity::{async_trait, prelude::*};
+use tracing::{debug, error, info, warn};
 
-mod utils;
+mod messages;
 mod subscription;
-use subscription::{Subscription, Subscriptions, SubscriptionHandleResult};
+mod utils;
+use subscription::{Subscription, SubscriptionHandleResult, Subscriptions};
 
-struct Handler;
-
+struct Handler {
+  loop_running: AtomicBool,
+}
 
 #[async_trait]
 impl EventHandler for Handler {
@@ -26,13 +28,13 @@ impl EventHandler for Handler {
       Some(c) => c,
       None => {
         warn!("Unsupported interaction: {:?}", interaction);
-        return
-      },
+        return;
+      }
     };
 
     if let Err(e) = command.defer(&ctx.http).await {
       error!("Error deferring command: {}", e);
-      return
+      return;
     }
 
     let handle_command = match command.data.name.as_str() {
@@ -41,23 +43,23 @@ impl EventHandler for Handler {
           SubscriptionHandleResult::Error(e) => {
             error!(e);
             utils::text_response(&ctx, command, "Unable to subscribe").await
-          },
+          }
           SubscriptionHandleResult::Removed(s) => {
             info!("Removed {:?}", s);
             utils::text_response(&ctx, command, s.format_to_string(&ctx, false).await).await
-          },
+          }
           SubscriptionHandleResult::Added(s) => {
             info!("Added {:?}", s);
             utils::text_response(&ctx, command, s.format_to_string(&ctx, true).await).await
           }
         }
-      },
+      }
       _ => utils::text_response(&ctx, command, "Unsupported").await,
     };
-    
+
     if let Err(e) = handle_command {
       error!("Error handling command: {}", e);
-      return
+      return;
     }
   }
 
@@ -74,17 +76,25 @@ impl EventHandler for Handler {
         .description_localized("ja", "このチャッネルのサブスクリプチオンをトッグル")
         .description_localized("fi", "Tilaa/peru tilaus lampaasta tälle kanavalle")
     })
-    .await {
+    .await
+    {
       Ok(c) => info!("Created command {:?}", c.name),
       Err(e) => error!("Error creating command: {}", e),
     }
 
-    
-
     info!("{} running", ready.user.tag());
   }
-}
 
+  async fn cache_ready(&self, ctx: Context, _guilds: Vec<GuildId>) {
+    let ctx = Arc::new(ctx);
+
+    if self.loop_running.load(Ordering::Relaxed) {
+      return;
+    }
+
+    tokio::spawn(messages::create_message_task(ctx));
+  }
+}
 
 #[tokio::main]
 async fn main() {
@@ -95,39 +105,31 @@ async fn main() {
     .with_target(false)
     .compact();
 
-  tracing_subscriber::fmt()
-    .event_format(format)
-    .init();
+  tracing_subscriber::fmt().event_format(format).init();
 
   let config = Config::builder()
     .add_source(config::File::with_name("sheep"))
     .build()
     .expect("Couldn't load Config");
 
-  let token = config
-    .get_string("token")
-    .expect("No token in config");
-  let intents = 
-    GatewayIntents::non_privileged() |
-    GatewayIntents::GUILD_MESSAGES |
-    GatewayIntents::MESSAGE_CONTENT;
-
-
+  let token = config.get_string("token").expect("No token in config");
+  let intents = GatewayIntents::non_privileged()
+    | GatewayIntents::GUILD_MESSAGES
+    | GatewayIntents::MESSAGE_CONTENT;
 
   let mut client = Client::builder(token, intents)
-    .event_handler(Handler)
+    .event_handler(Handler {
+      loop_running: AtomicBool::new(false),
+    })
     .await
     .expect("Unable to create client");
 
   {
     let mut data = client.data.write().await;
 
-    
-    let db = RonDb::new::<Subscription>("subscriptions.db")
-      .expect("Couldn't create DB");
+    let db = RonDb::new::<Subscription>("subscriptions.db").expect("Couldn't create DB");
     data.insert::<Subscriptions>(Arc::new(db));
   }
-
 
   if let Err(e) = client.start().await {
     error!("Error while running client: {}", e);
