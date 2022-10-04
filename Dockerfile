@@ -21,6 +21,6 @@ FROM debian:buster-slim
 WORKDIR /usr/src/sheep
 
 
-COPY --from=rust_builder /usr/src/sheep/target/release/sheep ./sheep
+COPY --from=rust_builder /usr/src/sheep/target/release/sheep ./sheep-bot
 
-CMD ./sheep
+CMD ./sheep-bot
