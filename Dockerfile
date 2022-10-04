@@ -23,4 +23,4 @@ WORKDIR /usr/src/sheep
 
 COPY --from=rust_builder /usr/src/sheep/target/release/sheep ./sheep
 
-CMD ./priidik
+CMD ./sheep
