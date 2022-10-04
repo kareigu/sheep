@@ -1,0 +1,8 @@
+services:
+  bot:
+    image: kareigu/sheep:latest
+    container_name: SheepBot
+    restart: unless-stopped
+    volumes:
+      - ./subscriptions.db.ron:/usr/src/sheep/subscriptions.db.ron
+      - ./sheep.toml:/usr/src/sheep/sheep.toml
