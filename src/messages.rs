@@ -20,27 +20,36 @@ enum DayType {
   Sunday(Time),
 }
 
-impl DayType {
-  pub fn from_date(date: DateTime<FixedOffset>) -> Option<Self> {
-    let time = {
-      if date.minute() != 0 {
-        return None;
-      }
+enum DayTypeConversionError {
+  NotSpecialTime,
+}
 
-      match date.hour() {
-        8 => Some(Time::Morning),
-        11 => Some(Time::MidDay),
-        16 => Some(Time::AfterWork),
-        22 => Some(Time::Evening),
-        _ => None,
-      }
+impl<T> TryFrom<DateTime<T>> for DayType
+where
+  T: TimeZone,
+{
+  type Error = DayTypeConversionError;
+
+  fn try_from(date: DateTime<T>) -> Result<Self, Self::Error> {
+    use DayTypeConversionError::NotSpecialTime;
+
+    if date.minute() != 0 {
+      return Err(NotSpecialTime);
+    }
+
+    let time = match date.hour() {
+      8 => Ok(Time::Morning),
+      11 => Ok(Time::MidDay),
+      16 => Ok(Time::AfterWork),
+      22 => Ok(Time::Evening),
+      _ => Err(NotSpecialTime),
     }?;
 
     match date.weekday() {
-      Weekday::Fri => Some(DayType::Friday(time)),
-      Weekday::Sat => Some(DayType::Saturday(time)),
-      Weekday::Sun => Some(DayType::Sunday(time)),
-      _ => Some(DayType::WorkDay(time)),
+      Weekday::Fri => Ok(DayType::Friday(time)),
+      Weekday::Sat => Ok(DayType::Saturday(time)),
+      Weekday::Sun => Ok(DayType::Sunday(time)),
+      _ => Ok(DayType::WorkDay(time)),
     }
   }
 }
@@ -98,12 +107,12 @@ pub async fn message_task(ctx: Arc<Context>) {
 
     let subscriptions_fetch = tokio::spawn(async move { db.find_all::<Subscription>().await });
 
-    let day_type = match DayType::from_date(now) {
-      None => {
+    let day_type = match DayType::try_from(now) {
+      Err(_e) => {
         sleep(sleep_for).await;
         continue;
       }
-      Some(t) => t,
+      Ok(t) => t,
     };
 
     let subscriptions = match subscriptions_fetch.await {
