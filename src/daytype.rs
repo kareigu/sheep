@@ -33,7 +33,7 @@ impl Time {
         data: Time::MidDay,
         last_possible: time.hour() == 14 && time.minute() == 59,
       }),
-      (17, 00..=15) => Ok(DateConversionReturn {
+      (16, 00..=15) => Ok(DateConversionReturn {
         data: Time::AfterWork,
         last_possible: time.minute() == 15,
       }),
