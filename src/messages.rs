@@ -36,7 +36,7 @@ pub async fn message_task(ctx: Arc<Context>) {
     let subscriptions_fetch =
       tokio::spawn(async move { db.find_all::<Subscription>().await });
 
-    let day_type = match DayType::try_from(now) {
+    let day_type = match DayType::try_parse_from_date(now) {
       Err(_e) => {
         sleep(sleep_for).await;
         continue;
@@ -65,20 +65,20 @@ pub async fn message_task(ctx: Arc<Context>) {
 
     for subscription in subscriptions {
       if let Some(t) = subscription.last_message {
-        if t == day_type {
+        if t == day_type.data {
           continue;
         }
       }
 
       let channel = subscription.channel;
 
-      if rand::thread_rng().gen_bool(0.55) {
+      if rand::thread_rng().gen_bool(0.85) && !day_type.last_possible {
         continue;
       }
 
       if let Err(e) = channel
         .send_message(&ctx.http, |message| {
-          message.embed(|embed| embed.title(&day_type).colour(0xFFFFFF))
+          message.embed(|embed| embed.title(&day_type.data).colour(0xFFFFFF))
         })
         .await
       {
@@ -92,7 +92,7 @@ pub async fn message_task(ctx: Arc<Context>) {
       let new_subscription = Subscription {
         guild: subscription.guild,
         channel: subscription.channel,
-        last_message: Some(day_type),
+        last_message: Some(day_type.data),
       };
 
       subscription.update(&ctx, new_subscription).await;
