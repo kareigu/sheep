@@ -1,15 +1,17 @@
 use std::sync::Arc;
 
+use crate::daytype::DayType;
 use reddb::{serializer::Ron, FileStorage, RedDb};
 use serde::{Deserialize, Serialize};
 use serenity::model::prelude::{ChannelId, GuildId};
 use serenity::prelude::{Context, TypeMapKey};
-use tracing::debug;
+use tracing::{debug, error, info};
 
 #[derive(Clone, Serialize, Eq, PartialEq, Deserialize, Debug)]
 pub struct Subscription {
   pub guild: GuildId,
   pub channel: ChannelId,
+  pub last_message: Option<DayType>,
 }
 
 pub enum SubscriptionHandleResult {
@@ -20,10 +22,18 @@ pub enum SubscriptionHandleResult {
 
 impl Subscription {
   pub fn new(guild: GuildId, channel: ChannelId) -> Self {
-    Self { guild, channel }
+    Self {
+      guild,
+      channel,
+      last_message: None,
+    }
   }
 
-  pub async fn format_to_string(&self, ctx: &Context, subscribed: bool) -> String {
+  pub async fn format_to_string(
+    &self,
+    ctx: &Context,
+    subscribed: bool,
+  ) -> String {
     let channel_name = self
       .channel
       .name(&ctx.cache)
@@ -63,7 +73,9 @@ impl Subscription {
       if let Some(handle) = data.get::<Subscriptions>() {
         handle.clone()
       } else {
-        return SubscriptionHandleResult::Error("Database not in shared data".to_string());
+        return SubscriptionHandleResult::Error(
+          "Database not in shared data".to_string(),
+        );
       }
     };
 
@@ -72,7 +84,12 @@ impl Subscription {
         debug!("Removed {} subscriptions", count);
         count != 0
       }
-      Err(e) => return SubscriptionHandleResult::Error(format!("Error removing: {}", e)),
+      Err(e) => {
+        return SubscriptionHandleResult::Error(format!(
+          "Error removing: {}",
+          e
+        ))
+      }
     };
 
     if deleted {
@@ -84,10 +101,34 @@ impl Subscription {
       self.guild, self.channel
     );
     if let Err(e) = db.insert_one(self.clone()).await {
-      return SubscriptionHandleResult::Error(format!("Error inserting: {}", e));
+      return SubscriptionHandleResult::Error(format!(
+        "Error inserting: {}",
+        e
+      ));
     };
 
     SubscriptionHandleResult::Added(self.clone())
+  }
+
+  pub async fn update(&self, ctx: &Context, new_subscription: Subscription) {
+    let db = {
+      let data = ctx.data.read().await;
+      if let Some(handle) = data.get::<Subscriptions>() {
+        handle.clone()
+      } else {
+        error!("Database not in shared data");
+        return;
+      }
+    };
+
+    if let Err(e) = db.delete(self).await {
+      error!("Error deleting subscription for update{}", e);
+      return;
+    }
+    match db.insert_one(new_subscription).await {
+      Err(e) => error!("Error deleting subscription for update{}", e),
+      Ok(d) => info!("Updated subscription for Guild({})", d.data.guild),
+    }
   }
 }
 

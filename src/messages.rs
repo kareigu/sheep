@@ -1,84 +1,12 @@
+use crate::daytype::DayType;
 use crate::subscription::{Subscription, Subscriptions};
 use chrono::offset::FixedOffset;
 use chrono::prelude::*;
+use rand::Rng;
 use serenity::prelude::Context;
-use std::{fmt::Display, sync::Arc};
+use std::sync::Arc;
 use tokio::time::sleep;
 use tracing::error;
-
-enum Time {
-  Morning,
-  MidDay,
-  AfterWork,
-  Evening,
-}
-
-enum DayType {
-  WorkDay(Time),
-  Friday(Time),
-  Saturday(Time),
-  Sunday(Time),
-}
-
-enum DayTypeConversionError {
-  NotSpecialTime,
-}
-
-impl<T> TryFrom<DateTime<T>> for DayType
-where
-  T: TimeZone,
-{
-  type Error = DayTypeConversionError;
-
-  fn try_from(date: DateTime<T>) -> Result<Self, Self::Error> {
-    use DayTypeConversionError::NotSpecialTime;
-
-    if date.minute() != 0 {
-      return Err(NotSpecialTime);
-    }
-
-    let time = match date.hour() {
-      8 => Ok(Time::Morning),
-      11 => Ok(Time::MidDay),
-      16 => Ok(Time::AfterWork),
-      22 => Ok(Time::Evening),
-      _ => Err(NotSpecialTime),
-    }?;
-
-    match date.weekday() {
-      Weekday::Fri => Ok(DayType::Friday(time)),
-      Weekday::Sat => Ok(DayType::Saturday(time)),
-      Weekday::Sun => Ok(DayType::Sunday(time)),
-      _ => Ok(DayType::WorkDay(time)),
-    }
-  }
-}
-
-impl Display for DayType {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    use DayType::*;
-    use Time::*;
-
-    let str = match self {
-      WorkDay(Morning) => "🏢🐑 Voi voi taas täytyy herätä imemään pomon perse karvoja,, BÄÄ BÄÄ",
-      WorkDay(MidDay) => "💩🐑 Aika käyttää naapurin Ari-Jukan vinkkiä ja käydä paskalla niin minulle maksetaan paskomisesta RÄH HÄH",
-      WorkDay(AfterWork) => "🏠🐑 Vihdoin pääsee kotiin niin ei tarvitse kusipää pomon olla nalkuttamassa",
-      WorkDay(Evening) => "🛏️🐑 Kohtahan se pitää mennä nukkumaan,, taidanpa laittaa herätys kellon valmiiksi",
-      Friday(Morning) => "🛏️🐑⏰ PIPIPI PIPIPI,,, saatanan herätyskello,, onneksi tänään on perjantai niin voi töiden jälkeen vetää pään tyhjäksi",
-      Friday(MidDay) => "💩🐑 Taidanpa perjantain kunniaksi käydä erikois pitkällä paskalla",
-      Friday(AfterWork) => "🏪🐑 Päästihän se pomo vihdoin lähtemään,, nyt äkkiä alkoon",
-      Friday(Evening) => "🍺🐑 Vittu että on hyvä meno kun ei tarvitse huomenna herätä ja voin juoda koko yön",
-      Saturday(Morning) => "🛏️🐑 Nythän se voisi olla aika mennä nukkumaan kun viinaksetkin on jo loppu",
-      Saturday(MidDay) | Sunday(Morning) => "🛏️ Zzz",
-      Saturday(AfterWork) => "🏪🐑 Voi vittu,, kello on jo noin paljon,, nyt äkkiä kauppaan hakemaan kaljat tälle päivälle",
-      Saturday(Evening) => "🍺🐑 Aika lähteä baariin laulamaan karaokea ja juomaan paikka tyhjäksi",
-      Sunday(MidDay) => "🐑 Vittu että on ihan hirveä krapula,, en kyllä juo enää ennen ensi kertaa RÄH HÄH",
-      Sunday(AfterWork) => "🍕🐑 Olipa hyvä Grandiosan pakaste sipuli pizza tasaamaan oloa",
-      Sunday(Evening) => "🛏️🐑 Oi voi,, taas pitää valmistautua nukkumaan että jaksaa huomenna leikkiä pomon perse karvoilla koko päivän"
-    };
-    write!(f, "{}", str)
-  }
-}
 
 pub async fn message_task(ctx: Arc<Context>) {
   loop {
@@ -105,7 +33,8 @@ pub async fn message_task(ctx: Arc<Context>) {
       (next - now).to_std().unwrap()
     };
 
-    let subscriptions_fetch = tokio::spawn(async move { db.find_all::<Subscription>().await });
+    let subscriptions_fetch =
+      tokio::spawn(async move { db.find_all::<Subscription>().await });
 
     let day_type = match DayType::try_from(now) {
       Err(_e) => {
@@ -127,12 +56,25 @@ pub async fn message_task(ctx: Arc<Context>) {
           sleep(sleep_for).await;
           continue;
         }
-        Ok(d) => d,
+        Ok(documents) => documents
+          .into_iter()
+          .map(|d| d.data)
+          .collect::<Vec<Subscription>>(),
       },
     };
 
     for subscription in subscriptions {
-      let channel = subscription.data.channel;
+      if let Some(t) = subscription.last_message {
+        if t == day_type {
+          continue;
+        }
+      }
+
+      let channel = subscription.channel;
+
+      if rand::thread_rng().gen_bool(0.55) {
+        continue;
+      }
 
       if let Err(e) = channel
         .send_message(&ctx.http, |message| {
@@ -144,7 +86,16 @@ pub async fn message_task(ctx: Arc<Context>) {
           "Error sending automatic message for ChannelId({}): {}",
           channel, e
         );
+        continue;
       }
+
+      let new_subscription = Subscription {
+        guild: subscription.guild,
+        channel: subscription.channel,
+        last_message: Some(day_type),
+      };
+
+      subscription.update(&ctx, new_subscription).await;
     }
 
     sleep(sleep_for).await;

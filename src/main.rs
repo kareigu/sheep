@@ -10,6 +10,7 @@ use serenity::model::prelude::GuildId;
 use serenity::{async_trait, prelude::*};
 use tracing::{error, info, warn};
 
+mod daytype;
 mod messages;
 mod subscription;
 mod utils;
@@ -37,18 +38,34 @@ impl EventHandler for Handler {
 
     let handle_command = match command.data.name.as_str() {
       "subscribe" => {
-        match Subscription::create_and_handle(&ctx, command.guild_id, command.channel_id).await {
+        match Subscription::create_and_handle(
+          &ctx,
+          command.guild_id,
+          command.channel_id,
+        )
+        .await
+        {
           SubscriptionHandleResult::Error(e) => {
             error!(e);
             utils::text_response(&ctx, command, "Unable to subscribe").await
           }
           SubscriptionHandleResult::Removed(s) => {
             info!("Removed {:?}", s);
-            utils::text_response(&ctx, command, s.format_to_string(&ctx, false).await).await
+            utils::text_response(
+              &ctx,
+              command,
+              s.format_to_string(&ctx, false).await,
+            )
+            .await
           }
           SubscriptionHandleResult::Added(s) => {
             info!("Added {:?}", s);
-            utils::text_response(&ctx, command, s.format_to_string(&ctx, true).await).await
+            utils::text_response(
+              &ctx,
+              command,
+              s.format_to_string(&ctx, true).await,
+            )
+            .await
           }
         }
       }
@@ -71,8 +88,14 @@ impl EventHandler for Handler {
         .name_localized("ja", "サブスクライブ")
         .name_localized("fi", "tilaa")
         .description("Toggle lamb's subscription to this channel")
-        .description_localized("ja", "このチャッネルのサブスクリプチオンをトッグル")
-        .description_localized("fi", "Tilaa/peru tilaus lampaasta tälle kanavalle")
+        .description_localized(
+          "ja",
+          "このチャッネルのサブスクリプチオンをトッグル",
+        )
+        .description_localized(
+          "fi",
+          "Tilaa/peru tilaus lampaasta tälle kanavalle",
+        )
     })
     .await
     {
@@ -125,7 +148,8 @@ async fn main() {
   {
     let mut data = client.data.write().await;
 
-    let db = RonDb::new::<Subscription>("subscriptions.db").expect("Couldn't create DB");
+    let db = RonDb::new::<Subscription>("subscriptions.db")
+      .expect("Couldn't create DB");
     data.insert::<Subscriptions>(Arc::new(db));
   }
 
