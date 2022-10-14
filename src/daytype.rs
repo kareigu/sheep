@@ -9,7 +9,18 @@ pub enum DateConversionError {
 
 pub struct DateConversionReturn<T> {
   pub data: T,
+  pub odds_to_skip: f64,
   pub last_possible: bool,
+}
+
+impl<DayType> DateConversionReturn<DayType> {
+  pub fn from_time(data: DayType, time: DateConversionReturn<Time>) -> Self {
+    Self {
+      data,
+      odds_to_skip: time.odds_to_skip,
+      last_possible: time.last_possible,
+    }
+  }
 }
 
 #[derive(PartialEq, Eq, Debug, Serialize, Deserialize, Clone, Copy)]
@@ -27,18 +38,22 @@ impl Time {
     match (time.hour(), time.minute()) {
       (6, 27..=33) => Ok(DateConversionReturn {
         data: Time::Morning,
+        odds_to_skip: 1.0 / 6.0,
         last_possible: time.minute() == 33,
       }),
       (11..=14, 0..=59) => Ok(DateConversionReturn {
         data: Time::MidDay,
+        odds_to_skip: 1.0 / 12.0,
         last_possible: time.hour() == 14 && time.minute() == 59,
       }),
       (16, 00..=15) => Ok(DateConversionReturn {
         data: Time::AfterWork,
+        odds_to_skip: 1.0 / 15.0,
         last_possible: time.minute() == 15,
       }),
       (22..=23, 0..=59) => Ok(DateConversionReturn {
         data: Time::Evening,
+        odds_to_skip: 1.0 / 12.0,
         last_possible: time.hour() == 23 && time.minute() == 59,
       }),
       _ => Err(DateConversionError::NotSpecialTime),
@@ -64,22 +79,22 @@ impl DayType {
     let time = Time::try_parse_from_time(date.time())?;
 
     match date.weekday() {
-      Weekday::Fri => Ok(DateConversionReturn {
-        data: DayType::Friday(time.data),
-        last_possible: time.last_possible,
-      }),
-      Weekday::Sat => Ok(DateConversionReturn {
-        data: DayType::Saturday(time.data),
-        last_possible: time.last_possible,
-      }),
-      Weekday::Sun => Ok(DateConversionReturn {
-        data: DayType::Sunday(time.data),
-        last_possible: time.last_possible,
-      }),
-      _ => Ok(DateConversionReturn {
-        data: DayType::WorkDay(time.data),
-        last_possible: time.last_possible,
-      }),
+      Weekday::Fri => Ok(DateConversionReturn::from_time(
+        DayType::Friday(time.data),
+        time,
+      )),
+      Weekday::Sat => Ok(DateConversionReturn::from_time(
+        DayType::Saturday(time.data),
+        time,
+      )),
+      Weekday::Sun => Ok(DateConversionReturn::from_time(
+        DayType::Sunday(time.data),
+        time,
+      )),
+      _ => Ok(DateConversionReturn::from_time(
+        DayType::WorkDay(time.data),
+        time,
+      )),
     }
   }
 }

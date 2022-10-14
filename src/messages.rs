@@ -71,8 +71,9 @@ pub async fn message_task(ctx: Arc<Context>) {
       }
 
       let channel = subscription.channel;
+      let skip = rand::thread_rng().gen_bool(day_type.odds_to_skip);
 
-      if rand::thread_rng().gen_bool(0.85) && !day_type.last_possible {
+      if skip && !day_type.last_possible {
         continue;
       }
 
