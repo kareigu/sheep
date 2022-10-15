@@ -2,11 +2,13 @@ use crate::daytype::DayType;
 use crate::subscription::{Subscription, Subscriptions};
 use chrono::offset::FixedOffset;
 use chrono::prelude::*;
-use rand::Rng;
 use serenity::prelude::Context;
 use std::sync::Arc;
 use tokio::time::sleep;
 use tracing::error;
+
+use tinyrand::{Probability, Rand, Seeded, StdRand};
+use tinyrand_std::ClockSeed;
 
 pub async fn message_task(ctx: Arc<Context>) {
   loop {
@@ -71,7 +73,11 @@ pub async fn message_task(ctx: Arc<Context>) {
       }
 
       let channel = subscription.channel;
-      let skip = rand::thread_rng().gen_bool(day_type.odds_to_skip);
+
+      let seed = ClockSeed::default().next_u64();
+      let mut rand = StdRand::seed(seed);
+      let probability = Probability::from(day_type.odds_to_skip);
+      let skip = rand.next_bool(probability);
 
       if skip && !day_type.last_possible {
         continue;

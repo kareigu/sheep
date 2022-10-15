@@ -10,7 +10,8 @@ config = "0.13"
 chrono = "0.4"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-rand = "0.8"
+tinyrand = "0.5.0"
+tinyrand-std = "0.5.0"
 
 [dependencies.reddb]
 git = "https://github.com/kareigu/reddb"
