@@ -5,7 +5,7 @@ use chrono::prelude::*;
 use serenity::prelude::Context;
 use std::sync::Arc;
 use tokio::time::sleep;
-use tracing::{error, info};
+use tracing::error;
 
 use tinyrand::{Probability, Rand, Seeded, StdRand};
 use tinyrand_std::ClockSeed;
