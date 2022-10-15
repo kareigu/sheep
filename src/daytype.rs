@@ -38,22 +38,22 @@ impl Time {
     match (time.hour(), time.minute()) {
       (6, 27..=33) => Ok(DateConversionReturn {
         data: Time::Morning,
-        odds_to_skip: 1.0 / 6.0,
+        odds_to_skip: 1.0 / 1.5,
         last_possible: time.minute() == 33,
       }),
       (11..=14, 0..=59) => Ok(DateConversionReturn {
         data: Time::MidDay,
-        odds_to_skip: 1.0 / 12.0,
+        odds_to_skip: 1.0 / 1.2,
         last_possible: time.hour() == 14 && time.minute() == 59,
       }),
       (16, 00..=15) => Ok(DateConversionReturn {
         data: Time::AfterWork,
-        odds_to_skip: 1.0 / 15.0,
+        odds_to_skip: 1.0 / 1.15,
         last_possible: time.minute() == 15,
       }),
       (22..=23, 0..=59) => Ok(DateConversionReturn {
         data: Time::Evening,
-        odds_to_skip: 1.0 / 12.0,
+        odds_to_skip: 1.0 / 1.2,
         last_possible: time.hour() == 23 && time.minute() == 59,
       }),
       _ => Err(DateConversionError::NotSpecialTime),
