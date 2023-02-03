@@ -2,16 +2,74 @@ use std::sync::Arc;
 
 use crate::daytype::DayType;
 use reddb::{serializer::Ron, FileStorage, RedDb};
+use reddb::{Document, Uuid};
 use serde::{Deserialize, Serialize};
 use serenity::model::prelude::{ChannelId, GuildId};
 use serenity::prelude::{Context, TypeMapKey};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 #[derive(Clone, Serialize, Eq, PartialEq, Deserialize, Debug)]
 pub struct Subscription {
   pub guild: GuildId,
   pub channel: ChannelId,
   pub last_message: Option<DayType>,
+}
+
+pub struct SubscriptionDoc(Document<Subscription>);
+
+impl From<Document<Subscription>> for SubscriptionDoc {
+  fn from(document: Document<Subscription>) -> Self {
+    Self(document)
+  }
+}
+
+impl SubscriptionDoc {
+  pub async fn update(&self, ctx: &Context, last_message: Option<DayType>) {
+    let db = {
+      let data = ctx.data.read().await;
+      if let Some(handle) = data.get::<Subscriptions>() {
+        handle.clone()
+      } else {
+        error!("Database not in shared data");
+        return;
+      }
+    };
+
+    let new_subscription = Subscription {
+      guild: self.guild(),
+      channel: self.channel(),
+      last_message,
+    };
+
+    let updated = match db.update_one(&self.id(), new_subscription).await {
+      Ok(b) => b,
+      Err(e) => {
+        error!("Error deleting subscription for update{}", e);
+        return;
+      }
+    };
+
+    match updated {
+      true => info!("Updated subscription for GuildId({})", self.guild()),
+      false => warn!("Nothing to update for GuildId({})", self.guild()),
+    }
+  }
+
+  pub fn id(&self) -> Uuid {
+    self.0._id
+  }
+
+  pub fn last_message(&self) -> Option<DayType> {
+    self.0.data.last_message
+  }
+
+  pub fn channel(&self) -> ChannelId {
+    self.0.data.channel
+  }
+
+  pub fn guild(&self) -> GuildId {
+    self.0.data.guild
+  }
 }
 
 pub enum SubscriptionHandleResult {
@@ -108,27 +166,6 @@ impl Subscription {
     };
 
     SubscriptionHandleResult::Added(self.clone())
-  }
-
-  pub async fn update(&self, ctx: &Context, new_subscription: Subscription) {
-    let db = {
-      let data = ctx.data.read().await;
-      if let Some(handle) = data.get::<Subscriptions>() {
-        handle.clone()
-      } else {
-        error!("Database not in shared data");
-        return;
-      }
-    };
-
-    if let Err(e) = db.delete(self).await {
-      error!("Error deleting subscription for update{}", e);
-      return;
-    }
-    match db.insert_one(new_subscription).await {
-      Err(e) => error!("Error deleting subscription for update{}", e),
-      Ok(d) => info!("Updated subscription for Guild({})", d.data.guild),
-    }
   }
 }
 

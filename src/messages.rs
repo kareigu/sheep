@@ -1,5 +1,5 @@
 use crate::daytype::DayType;
-use crate::subscription::{Subscription, Subscriptions};
+use crate::subscription::{Subscription, SubscriptionDoc, Subscriptions};
 use chrono::offset::FixedOffset;
 use chrono::prelude::*;
 use serenity::prelude::Context;
@@ -60,18 +60,18 @@ pub async fn message_task(ctx: Arc<Context>) {
         }
         Ok(documents) => documents
           .into_iter()
-          .map(|d| d.data)
-          .collect::<Vec<Subscription>>(),
+          .map(|d| d.into())
+          .collect::<Vec<SubscriptionDoc>>(),
       },
     };
 
     for subscription in subscriptions {
-      if let Some(t) = subscription.last_message {
+      if let Some(t) = subscription.last_message() {
         if t == day_type.data {
           continue;
         }
       }
-      let channel = subscription.channel;
+      let channel = subscription.channel();
 
       let seed = ClockSeed::default().next_u64();
       let mut rand = StdRand::seed(seed);
@@ -84,7 +84,7 @@ pub async fn message_task(ctx: Arc<Context>) {
 
       if let Err(e) = channel
         .send_message(&ctx.http, |message| {
-          message.embed(|embed| embed.title(&day_type.data).colour(0xFFFFFF))
+          message.embed(|embed| embed.title(day_type.data).colour(0xFFFFFF))
         })
         .await
       {
@@ -95,13 +95,7 @@ pub async fn message_task(ctx: Arc<Context>) {
         continue;
       }
 
-      let new_subscription = Subscription {
-        guild: subscription.guild,
-        channel: subscription.channel,
-        last_message: Some(day_type.data),
-      };
-
-      subscription.update(&ctx, new_subscription).await;
+      subscription.update(&ctx, Some(day_type.data)).await;
     }
 
     sleep(sleep_for).await;
